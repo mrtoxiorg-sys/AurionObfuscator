@@ -41,6 +41,25 @@ public final class NameGenerator {
         return prefix + name;
     }
 
+    /**
+     * Имя из компактного «пула» для overload-collapse: возвращает имена по
+     * кругу из небольшого набора, НЕ гарантируя уникальность (уникальность на
+     * уровне name+desc проверяет вызывающая сторона). Даёт много одноимённых
+     * членов, максимально путающих декомпилятор.
+     *
+     * @param index произвольный счётчик вызывающей стороны
+     */
+    public String collapsed(long index) {
+        // очень маленький алфавит => частые коллизии имён (это цель)
+        // но валидные идентификаторы JVM
+        char[] cs;
+        switch (style) {
+            case "illegal", "dictionary" -> cs = new char[]{'l', 'I'};
+            default -> cs = new char[]{'a', 'b'};
+        }
+        return prefix + fromCharset(index, cs, 2);
+    }
+
     private String generate(long n) {
         switch (style) {
             case "illegal":

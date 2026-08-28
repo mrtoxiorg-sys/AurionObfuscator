@@ -1,4 +1,5 @@
 {
+  "profile": "custom",
   "input": null,
   "output": null,
   "libraries": [],
@@ -14,28 +15,51 @@
     "fields": true,
     "dictionary": "illegal",
     "flattenPackage": null,
-    "prefix": ""
+    "prefix": "",
+    "overloadCollapse": false,
+    "include": [],
+    "exclude": []
   },
   "stringEncryption": {
     "enabled": true,
     "minLength": 1,
-    "skipPatterns": []
+    "skipPatterns": [],
+    "strategy": "shared",
+    "poolSize": 8,
+    "lazyArray": false,
+    "include": [],
+    "exclude": []
   },
   "controlFlow": {
     "enabled": true,
     "intensity": 2,
     "opaquePredicates": true,
-    "bogusJumps": true
+    "bogusJumps": true,
+    "runtimePredicates": false,
+    "include": [],
+    "exclude": []
   },
   "numbers": {
     "enabled": true,
     "integers": true,
-    "longs": true
+    "longs": true,
+    "include": [],
+    "exclude": []
   },
   "debugStrip": {
     "enabled": true,
     "lineNumbers": true,
     "localVariables": true,
-    "sourceFile": true
+    "sourceFile": true,
+    "include": [],
+    "exclude": []
+  },
+  "antiDecompile": {
+    "enabled": false,
+    "fakeTryCatch": true,
+    "deadCode": true,
+    "intensity": 2,
+    "include": [],
+    "exclude": []
   }
 }

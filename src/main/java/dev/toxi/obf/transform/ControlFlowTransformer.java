@@ -66,6 +66,8 @@ public final class ControlFlowTransformer implements Transformer {
         boolean needSeed = false;
         int intensity = Math.max(1, cfg.controlFlow.intensity);
 
+        boolean runtime = cfg.controlFlow.runtimePredicates;
+
         for (MethodNode m : cn.methods) {
             if (m.instructions == null || m.instructions.size() == 0) continue;
             if (m.name.equals("<clinit>")) continue; // не трогаем статик-инициализатор
@@ -73,7 +75,11 @@ public final class ControlFlowTransformer implements Transformer {
             if ((m.access & (ACC_ABSTRACT | ACC_NATIVE)) != 0) continue;
 
             if (cfg.controlFlow.opaquePredicates) {
-                if (insertOpaquePredicates(cn, m, intensity)) needSeed = true;
+                if (runtime) {
+                    insertRuntimePredicate(m);
+                } else if (insertOpaquePredicates(cn, m, intensity)) {
+                    needSeed = true;
+                }
             }
             if (cfg.controlFlow.bogusJumps) {
                 insertBogusJumps(m, intensity);
@@ -127,6 +133,48 @@ public final class ControlFlowTransformer implements Transformer {
         list.insertBefore(first, pre);
         injected++;
         return true;
+    }
+
+    /**
+     * Runtime opaque predicate: предикат на значении, которое декомпилятор не
+     * может доказать статически (констант-фолдинг бессилен). Используем
+     * {@code System.nanoTime()}: {@code (nanoTime() | 1) != 0} — всегда истина
+     * (число нечётное => не ноль), но значение неизвестно на этапе анализа.
+     *
+     * Раскладка в начале метода:
+     *   INVOKESTATIC System.nanoTime ()J
+     *   LCONST_1 ; LOR ; LCONST_0 ; LCMP        // (v|1) <=> 0
+     *   IFNE realStart                          // всегда true
+     *   bogus: NEW ArithmeticException; ...; ATHROW
+     *   realStart: <оригинал>
+     */
+    private void insertRuntimePredicate(MethodNode m) {
+        InsnList list = m.instructions;
+        AbstractInsnNode first = list.getFirst();
+        if (first == null) return;
+
+        LabelNode realStart = new LabelNode(new Label());
+        LabelNode bogus = new LabelNode(new Label());
+
+        InsnList pre = new InsnList();
+        pre.add(new org.objectweb.asm.tree.MethodInsnNode(INVOKESTATIC,
+                "java/lang/System", "nanoTime", "()J", false));
+        pre.add(new InsnNode(LCONST_1));
+        pre.add(new InsnNode(LOR));           // v | 1  (нечётное => != 0)
+        pre.add(new InsnNode(LCONST_0));
+        pre.add(new InsnNode(LCMP));          // (v|1) == 0 ? 0 : (+/-1)
+        pre.add(new JumpInsnNode(IFNE, realStart)); // всегда переход -> real
+
+        pre.add(bogus);
+        pre.add(new TypeInsnNode(NEW, "java/lang/ArithmeticException"));
+        pre.add(new InsnNode(DUP));
+        pre.add(new org.objectweb.asm.tree.MethodInsnNode(INVOKESPECIAL,
+                "java/lang/ArithmeticException", "<init>", "()V", false));
+        pre.add(new InsnNode(ATHROW));
+        pre.add(realStart);
+
+        list.insertBefore(first, pre);
+        injected++;
     }
 
     /**

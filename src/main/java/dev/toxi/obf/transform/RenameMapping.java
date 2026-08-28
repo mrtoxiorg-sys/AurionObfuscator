@@ -47,6 +47,22 @@ public final class RenameMapping {
     private final NameGenerator classNames;
     private final NameGenerator memberNames;
 
+    /**
+     * Занятые сигнатуры методов для overload-collapse: строки вида
+     * owner \0 newName \0 desc. Не позволяют коллапсу создать дубликат
+     * (name+desc) в одном классе — JVM это запрещает.
+     */
+    private final Set<String> usedMethodSig = new HashSet<>();
+
+    /**
+     * Занятые сигнатуры полей для overload-collapse: owner \0 newName \0 desc.
+     * Два поля в одном классе не могут иметь одинаковые name+desc.
+     */
+    private final Set<String> usedFieldSig = new HashSet<>();
+
+    /** Счётчик для collapsed-имён (общий, для «кругового» перебора пула). */
+    private long collapseCounter = 0;
+
     public RenameMapping(ClassPool pool, ObfConfig cfg, KeepRules keep, FabricMetadata fabric) {
         this.pool = pool;
         this.cfg = cfg;
@@ -123,7 +139,7 @@ public final class RenameMapping {
             boolean isEnum = (cn.access & Opcodes.ACC_ENUM) != 0;
             for (FieldNode f : cn.fields) {
                 if (!canRenameField(cn, f, isEnum)) continue;
-                fieldMap.put(cn.name + "." + f.name, memberNames.next());
+                fieldMap.put(cn.name + "." + f.name, chooseFieldName(cn.name, f.desc));
             }
         }
     }
@@ -179,7 +195,7 @@ public final class RenameMapping {
                 }
                 if (keptSomewhere) continue;
 
-                String newName = memberNames.next();
+                String newName = chooseMethodName(group, m.desc);
                 // Применяем ко всем классам группы, у кого есть метод с таким name+desc
                 for (String g : group) {
                     ClassInfo gi = pool.get(g);
@@ -188,6 +204,9 @@ public final class RenameMapping {
                         if (gm.name.equals(m.name) && gm.desc.equals(m.desc)) {
                             methodMap.put(g + "." + m.name + m.desc, newName);
                             processed.add(g + "." + m.name + m.desc);
+                            // резервируем (owner, newName, desc), чтобы overload
+                            // не создал дубликат сигнатуры в этом классе
+                            usedMethodSig.add(g + "\u0000" + newName + "\u0000" + m.desc);
                         }
                     }
                 }
@@ -210,6 +229,65 @@ public final class RenameMapping {
         // keep по имени
         if (keep.matchesMember(cn.name, m.name)) return false;
         return true;
+    }
+
+    /**
+     * Выбирает новое имя метода для группы классов с дескриптором desc.
+     *
+     * overloadCollapse=false: обычное уникальное имя.
+     * overloadCollapse=true : берём collapsed-имя из компактного пула по кругу;
+     * если оно порождает коллизию (owner, name, desc) в любом классе группы —
+     * пробуем следующее. В результате много несвязанных методов получают одно
+     * имя, различаясь лишь дескриптором => декомпилятор выдаёт кашу из a(...).
+     */
+    private String chooseMethodName(Set<String> group, String desc) {
+        if (!cfg.rename.overloadCollapse) {
+            return memberNames.next();
+        }
+        for (int attempts = 0; attempts < 100000; attempts++) {
+            String cand = memberNames.collapsed(collapseCounter++);
+            boolean clash = false;
+            for (String g : group) {
+                if (usedMethodSig.contains(g + "\u0000" + cand + "\u0000" + desc)) {
+                    clash = true;
+                    break;
+                }
+            }
+            if (!clash) return cand;
+        }
+        // защита от бесконечного цикла — деградация на уникальное имя
+        return memberNames.next();
+    }
+
+    /**
+     * Выбирает новое имя поля в классе owner с типом desc.
+     * При overloadCollapse — collapsed-имя, избегая коллизии (owner, name, desc).
+     */
+    private String chooseFieldName(String owner, String desc) {
+        if (!cfg.rename.overloadCollapse) {
+            return memberNames.next();
+        }
+        // Резервируем сигнатуру поля во ВСЕЙ иерархии-группе класса, чтобы
+        // collapse не породил shadowing (поле подкласса с тем же name+desc, что
+        // унаследованное) — это ломает разрешение ссылок в ObfRemapper.
+        Set<String> group = pool.hierarchyGroup(owner);
+        for (int attempts = 0; attempts < 100000; attempts++) {
+            String cand = memberNames.collapsed(collapseCounter++);
+            boolean clash = false;
+            for (String g : group) {
+                if (usedFieldSig.contains(g + "\u0000" + cand + "\u0000" + desc)) {
+                    clash = true;
+                    break;
+                }
+            }
+            if (!clash) {
+                for (String g : group) {
+                    usedFieldSig.add(g + "\u0000" + cand + "\u0000" + desc);
+                }
+                return cand;
+            }
+        }
+        return memberNames.next();
     }
 
     // ---------------------------------------------------------

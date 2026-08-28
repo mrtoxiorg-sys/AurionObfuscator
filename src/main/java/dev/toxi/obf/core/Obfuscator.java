@@ -3,6 +3,7 @@ package dev.toxi.obf.core;
 import dev.toxi.obf.config.ObfConfig;
 import dev.toxi.obf.fabric.FabricDetector;
 import dev.toxi.obf.fabric.FabricMetadata;
+import dev.toxi.obf.transform.AntiDecompileTransformer;
 import dev.toxi.obf.transform.ControlFlowTransformer;
 import dev.toxi.obf.transform.DebugStripTransformer;
 import dev.toxi.obf.transform.NumberTransformer;
@@ -47,6 +48,9 @@ public final class Obfuscator {
         this.cfg = cfg;
     }
 
+    /** Пара «трансформер + его targeting-матчер». */
+    private record Stage(Transformer tx, TargetMatcher matcher) {}
+
     public void run() throws IOException {
         Log.setVerbose(cfg.verbose);
 
@@ -89,36 +93,79 @@ public final class Obfuscator {
         KeepRules keep = new KeepRules();
         keep.addAll(cfg.keep);
 
-        // ---- 3. Генерация класса-декриптора строк (если нужен) ----
-        String decryptorName = null;
+        // ---- 3. Генерация класса(ов)-декриптора строк (если нужен) ----
+        String decryptorName = null;                 // shared
+        List<String> poolNames = new ArrayList<>();  // pool
         StringEncryptTransformer stringTx = null;
         if (cfg.stringEncryption.enabled) {
-            decryptorName = pickDecryptorName(pool);
-            ClassNode decryptor = StringDecryptorGenerator.generate(decryptorName);
-            // добавляем как input-класс, чтобы он попал в выход и (при желании)
-            // переименовался вместе со всеми
-            pool.addInput(decryptor);
-            stringTx = new StringEncryptTransformer(cfg, decryptorName);
-            Log.debug("Класс-декриптор строк: " + decryptorName);
+            String strategy = cfg.stringEncryption.strategy == null
+                    ? "shared" : cfg.stringEncryption.strategy;
+            switch (strategy) {
+                case "perClass" -> {
+                    // дешифратор встраивается в каждый класс самим трансформером
+                    stringTx = new StringEncryptTransformer(cfg, null, null);
+                    Log.debug("String encryption: per-class встраиваемые дешифраторы"
+                            + (cfg.stringEncryption.lazyArray ? " + lazy array" : ""));
+                }
+                case "pool" -> {
+                    int n = Math.max(1, cfg.stringEncryption.poolSize);
+                    for (int k = 0; k < n; k++) {
+                        String nm = pickDecryptorName(pool);
+                        while (poolNames.contains(nm)) nm = pickDecryptorName(pool);
+                        poolNames.add(nm);
+                        pool.addInput(StringDecryptorGenerator.generate(nm));
+                    }
+                    stringTx = new StringEncryptTransformer(cfg, null, poolNames);
+                    Log.debug("String encryption: пул из " + n + " дешифраторов");
+                }
+                default -> {
+                    decryptorName = pickDecryptorName(pool);
+                    pool.addInput(StringDecryptorGenerator.generate(decryptorName));
+                    stringTx = new StringEncryptTransformer(cfg, decryptorName, null);
+                    Log.debug("String encryption: общий дешифратор " + decryptorName);
+                }
+            }
         }
 
         // ---- 3b. Instruction-level трансформеры ----
-        List<Transformer> txs = new ArrayList<>();
-        if (stringTx != null) txs.add(stringTx);
+        // Каждый трансформер идёт в паре со своим TargetMatcher (include/exclude).
+        List<Stage> stages = new ArrayList<>();
+        if (stringTx != null) {
+            stages.add(new Stage(stringTx,
+                    new TargetMatcher(cfg.stringEncryption, cfg.excludePackages)));
+        }
         NumberTransformer numberTx = new NumberTransformer(cfg);
         ControlFlowTransformer flowTx = new ControlFlowTransformer(cfg);
         DebugStripTransformer debugTx = new DebugStripTransformer(cfg);
-        if (numberTx.enabled()) txs.add(numberTx);
-        if (flowTx.enabled()) txs.add(flowTx);
-        if (debugTx.enabled()) txs.add(debugTx);
+        AntiDecompileTransformer antiTx = new AntiDecompileTransformer(cfg);
+        if (numberTx.enabled()) {
+            stages.add(new Stage(numberTx, new TargetMatcher(cfg.numbers, cfg.excludePackages)));
+        }
+        if (flowTx.enabled()) {
+            stages.add(new Stage(flowTx, new TargetMatcher(cfg.controlFlow, cfg.excludePackages)));
+        }
+        if (antiTx.enabled()) {
+            stages.add(new Stage(antiTx, new TargetMatcher(cfg.antiDecompile, cfg.excludePackages)));
+        }
+        if (debugTx.enabled()) {
+            stages.add(new Stage(debugTx, new TargetMatcher(cfg.debugStrip, cfg.excludePackages)));
+        }
 
-        for (Transformer tx : txs) {
+        // множество сгенерированных декрипторов (не шифруем их строки — их там нет,
+        // и не встраиваем в них per-class дешифратор)
+        java.util.Set<String> decryptorClasses = new java.util.HashSet<>();
+        if (decryptorName != null) decryptorClasses.add(decryptorName);
+        decryptorClasses.addAll(poolNames);
+
+        for (Stage st : stages) {
+            Transformer tx = st.tx;
             if (!tx.enabled()) continue;
             int applied = 0;
             for (ClassInfo ci : pool.inputClasses()) {
-                // не трансформируем сам декриптор строковым шифрованием (иначе
-                // рекурсия), но остальными можно
-                if (ci.node.name.equals(decryptorName) && tx == stringTx) continue;
+                // не трансформируем сами декрипторы строковым шифрованием
+                if (tx == stringTx && decryptorClasses.contains(ci.node.name)) continue;
+                // per-class targeting
+                if (!st.matcher.allows(ci.node.name)) continue;
                 tx.transform(pool, ci.node);
                 applied++;
             }
@@ -127,6 +174,7 @@ public final class Obfuscator {
         if (stringTx != null) Log.info("Зашифровано строк: " + stringTx.encryptedCount());
         if (numberTx.enabled()) Log.info("Обфусцировано чисел: " + numberTx.count());
         if (flowTx.enabled()) Log.info("Вставлено flow-конструкций: " + flowTx.injected());
+        if (antiTx.enabled()) Log.info("Анти-декомпилятор вставок: " + antiTx.injected());
 
         // ---- 4. Rename ----
         List<ClassNode> outputNodes = new ArrayList<>();

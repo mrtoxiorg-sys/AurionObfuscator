@@ -1,0 +1,30 @@
+{
+  "//": "Пример: профиль heavy как база + точечные переопределения.",
+  "//1": "Профиль выставляет per-class дешифраторы, overload-collapse,",
+  "//2": "runtime-предикаты, flat-namespace и анти-декомпилятор трюки.",
+  "//3": "Ниже мы лишь докручиваем детали поверх профиля.",
+
+  "profile": "heavy",
+  "verbose": true,
+  "mappingsOutput": "mappings.txt",
+
+  "keep": [
+    "dev.toxi.aurion.AurionQol",
+    "dev.toxi.aurion.config.**"
+  ],
+
+  "stringEncryption": {
+    "skipPatterns": ["^aurionqol$", ".*\\.mixins\\.json$"]
+  },
+
+  "antiDecompile": {
+    "//": "Тяжёлые анти-декомпилятор трюки — только к пакету рендера,",
+    "//1": "чтобы не раздувать тик-критичный код гейм-логики.",
+    "include": ["dev.toxi.aurion.utils.render.**"]
+  },
+
+  "controlFlow": {
+    "//": "Control-flow не трогает горячий тик-луп.",
+    "exclude": ["dev.toxi.aurion.**.tick.**"]
+  }
+}

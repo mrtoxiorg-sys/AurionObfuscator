@@ -38,6 +38,7 @@ public final class Cli {
         Boolean noRename = null, noStrings = null, noFlow = null, noNumbers = null, noDebug = null;
         String dict = null, flatten = null;
         Integer intensity = null;
+        String profile = null;
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
@@ -80,6 +81,9 @@ public final class Cli {
                 case "--flatten":
                     flatten = req(args, ++i, a);
                     break;
+                case "-p": case "--profile":
+                    profile = req(args, ++i, a);
+                    break;
                 case "--intensity":
                     intensity = Integer.parseInt(req(args, ++i, a));
                     break;
@@ -108,7 +112,19 @@ public final class Cli {
             }
         }
 
-        if (cfg == null) cfg = ConfigLoader.defaults();
+        // Профиль из CLI: если конфиг не загружен — начинаем с пресета профиля.
+        // Если конфиг загружен, --profile перекрывает базу (перечитываем пресет
+        // и накладываем уже загруженные значения поверх было бы сложно, поэтому
+        // при наличии --config профиль игнорируется в пользу поля "profile" в JSON).
+        if (cfg == null) {
+            if (profile != null) {
+                cfg = dev.toxi.obf.config.Profiles.preset(profile);
+            } else {
+                cfg = ConfigLoader.defaults();
+            }
+        } else if (profile != null) {
+            Log.warn("--profile игнорируется при использовании --config; задайте \"profile\" внутри JSON.");
+        }
 
         // применяем переопределения
         if (input != null) cfg.input = input;
@@ -167,7 +183,12 @@ public final class Cli {
               -l, --library <jar>     Библиотека для анализа (можно несколько)
               -k, --keep <pattern>    Keep-правило (можно несколько)
               -m, --mappings <file>   Записать mappings (original -> obf)
+              -p, --profile <name>    Пресет: light | medium | heavy | insane
               -v, --verbose           Подробный лог
+
+            ПРОФИЛИ:
+              -p, --profile <name>    Пресет: light | medium | heavy | insane
+                                      (база; поля JSON/CLI перекрывают)
 
             НАСТРОЙКА RENAME:
               --dictionary <style>    Стиль имён: alpha | illegal | dictionary
