@@ -21,6 +21,7 @@ public final class NameGenerator {
 
     private final String style;
     private final String prefix;
+    private final boolean classSafe;
     private long counter = 0;
     private final Set<String> used = new HashSet<>();
 
@@ -29,8 +30,22 @@ public final class NameGenerator {
     private static final char[] DICT = {'I', 'l', '1', 'O', '0', 'o'};
 
     public NameGenerator(String style, String prefix) {
+        this(style, prefix, false);
+    }
+
+    /**
+     * @param classSafe если true — первый символ имени НЕ будет 'L' или 'I'.
+     *   Это критично для ИМЁН КЛАССОВ: дескриптор ссылочного типа имеет вид
+     *   {@code L<internal>;}, и если internal начинается с 'L' (например "Ljlj"),
+     *   получается {@code LLjlj;} — парсер дескрипторов Fabric Mixin
+     *   (MixinTargetContext.transformSingleDescriptor) на таком имени падает с
+     *   StringIndexOutOfBoundsException. Запрет 'L'/'I' в начале убирает этот
+     *   класс несовместимостей, почти не теряя запутанности имён.
+     */
+    public NameGenerator(String style, String prefix, boolean classSafe) {
         this.style = style == null ? "alpha" : style;
         this.prefix = prefix == null ? "" : prefix;
+        this.classSafe = classSafe;
     }
 
     public String next() {
@@ -57,15 +72,15 @@ public final class NameGenerator {
             case "illegal", "dictionary" -> cs = new char[]{'l', 'I'};
             default -> cs = new char[]{'a', 'b'};
         }
-        return prefix + fromCharset(index, cs, 2);
+        return prefix + fromCharset(index, cs, 2, false);
     }
 
     private String generate(long n) {
         switch (style) {
             case "illegal":
-                return fromCharset(n, ILLEGAL, 4);
+                return fromCharset(n, ILLEGAL, 4, classSafe);
             case "dictionary":
-                return fromCharset(n, DICT, 8);
+                return fromCharset(n, DICT, 8, classSafe);
             case "alpha":
             default:
                 return alpha(n);
@@ -89,7 +104,7 @@ public final class NameGenerator {
      * слишком короткими (иначе легко читаются). Первый символ обязан быть
      * буквой (не цифрой) — требование JVM для начала идентификатора.
      */
-    private static String fromCharset(long n, char[] cs, int minLen) {
+    private static String fromCharset(long n, char[] cs, int minLen, boolean classSafe) {
         StringBuilder sb = new StringBuilder();
         long v = n + 1;
         while (v > 0) {
@@ -105,6 +120,15 @@ public final class NameGenerator {
         char first = sb.charAt(0);
         if (first == '1' || first == '0') {
             sb.setCharAt(0, 'l');
+        }
+        // Для имён классов первый символ не должен быть 'L'/'I': дескриптор
+        // L<name>; иначе даёт LL.../LI..., что ломает парсер дескрипторов
+        // Fabric Mixin. Заменяем на 'j' (визуально по-прежнему confusing).
+        if (classSafe) {
+            char f = sb.charAt(0);
+            if (f == 'L' || f == 'I') {
+                sb.setCharAt(0, 'j');
+            }
         }
         return sb.toString();
     }

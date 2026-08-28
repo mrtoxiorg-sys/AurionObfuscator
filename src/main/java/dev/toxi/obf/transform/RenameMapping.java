@@ -68,7 +68,9 @@ public final class RenameMapping {
         this.cfg = cfg;
         this.keep = keep;
         this.fabric = fabric;
-        this.classNames = new NameGenerator(cfg.rename.dictionary, cfg.rename.prefix);
+        // classSafe=true: имена классов не начинаются с 'L'/'I' — иначе
+        // дескриптор L<name>; ломает парсер Fabric Mixin (см. NameGenerator).
+        this.classNames = new NameGenerator(cfg.rename.dictionary, cfg.rename.prefix, true);
         this.memberNames = new NameGenerator(cfg.rename.dictionary, "");
     }
 

@@ -206,9 +206,13 @@ public final class Obfuscator {
         Log.ok("Готово за " + dt + " мс. Классов записано: " + outputNodes.size());
     }
 
-    /** Выбирает нечитаемое имя для класса-декриптора, не конфликтующее с существующими. */
+    /**
+     * Выбирает нечитаемое имя для класса-декриптора, не конфликтующее с
+     * существующими. Первый символ НЕ 'L'/'I' — иначе дескриптор L<name>;
+     * (напр. LIl3f;) ломает парсер дескрипторов Fabric Mixin.
+     */
     private String pickDecryptorName(ClassPool pool) {
-        String[] pool2 = {"Il", "lI", "II", "ll", "l1", "1l"};
+        String[] pool2 = {"jl", "lj", "jj", "ll", "lI", "jI"};
         for (int i = 0; i < 10000; i++) {
             String candidate = pool2[ThreadLocalRandom.current().nextInt(pool2.length)]
                     + Integer.toHexString(ThreadLocalRandom.current().nextInt(0xFFFF));
