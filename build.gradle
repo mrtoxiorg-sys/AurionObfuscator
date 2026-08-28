@@ -1,0 +1,52 @@
+plugins {
+	id 'java'
+	id 'application'
+}
+
+group = 'dev.toxi.obf'
+version = '1.0.0'
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	// ASM — трансформация байткода (индустриальный стандарт)
+	implementation 'org.ow2.asm:asm:9.7.1'
+	implementation 'org.ow2.asm:asm-commons:9.7.1'
+	implementation 'org.ow2.asm:asm-tree:9.7.1'
+	implementation 'org.ow2.asm:asm-analysis:9.7.1'
+
+	// Gson — парсинг конфигов и fabric.mod.json / mixins.json
+	implementation 'com.google.code.gson:gson:2.11.0'
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+application {
+	// точка входа диспетчерит между CLI и GUI
+	mainClass = 'dev.toxi.obf.Main'
+}
+
+// Fat-jar: собираем все зависимости внутрь исполняемого jar
+tasks.register('fatJar', Jar) {
+	archiveClassifier = 'all'
+	manifest {
+		attributes 'Main-Class': 'dev.toxi.obf.Main'
+	}
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	from sourceSets.main.output
+	dependsOn configurations.runtimeClasspath
+	from {
+		configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+	}
+	exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'module-info.class'
+}
+
+tasks.named('build') {
+	dependsOn 'fatJar'
+}

@@ -1,0 +1,41 @@
+{
+  "input": null,
+  "output": null,
+  "libraries": [],
+  "autoDetectFabric": true,
+  "keep": [],
+  "excludePackages": [],
+  "verbose": false,
+  "mappingsOutput": null,
+  "rename": {
+    "enabled": true,
+    "classes": true,
+    "methods": true,
+    "fields": true,
+    "dictionary": "illegal",
+    "flattenPackage": null,
+    "prefix": ""
+  },
+  "stringEncryption": {
+    "enabled": true,
+    "minLength": 1,
+    "skipPatterns": []
+  },
+  "controlFlow": {
+    "enabled": true,
+    "intensity": 2,
+    "opaquePredicates": true,
+    "bogusJumps": true
+  },
+  "numbers": {
+    "enabled": true,
+    "integers": true,
+    "longs": true
+  },
+  "debugStrip": {
+    "enabled": true,
+    "lineNumbers": true,
+    "localVariables": true,
+    "sourceFile": true
+  }
+}
